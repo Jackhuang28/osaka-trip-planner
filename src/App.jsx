@@ -6,12 +6,13 @@ import {
 } from 'lucide-react';
 
 // --- 風格設定 (Zakka Style) ---
+// 動態載入可愛的圓體字型
 const fontLink = document.createElement('link');
 fontLink.href = "https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700&display=swap";
 fontLink.rel = "stylesheet";
 document.head.appendChild(fontLink);
 
-// 模擬座標與資料
+// --- 模擬座標與資料庫 ---
 const PREDEFINED_LOCATIONS = {
   "關西機場": { x: 20, y: 95, area: "Gateway", defaultDuration: 60 },
   "難波": { x: 50, y: 60, area: "Minami", defaultDuration: 120 },
@@ -31,6 +32,7 @@ const PREDEFINED_LOCATIONS = {
   "四天王寺": { x: 55, y: 72, area: "Tennoji", defaultDuration: 60 },
 };
 
+// 預設行程資料
 const DEFAULT_ITINERARY = [
   {
     id: 1,
@@ -43,7 +45,7 @@ const DEFAULT_ITINERARY = [
   }
 ];
 
-// 工具函式
+// --- 工具函式 ---
 const getDistance = (p1, p2) => {
   if (!p1 || !p2) return 0;
   return Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2));
@@ -64,7 +66,7 @@ const addTime = (timeStr, minutes) => {
 };
 
 export default function OsakaZakkaPlanner() {
-  // API Key 相關
+  // --- State: API Key ---
   const [apiKey, setApiKey] = useState(() => {
     try {
       return localStorage.getItem("gemini_api_key") || "";
@@ -74,14 +76,14 @@ export default function OsakaZakkaPlanner() {
   });
   const [showSettings, setShowSettings] = useState(!apiKey);
   
-  // 核心資料 State
+  // --- State: 核心資料 ---
   const [activeDay, setActiveDay] = useState(1);
   const [itinerary, setItinerary] = useState(DEFAULT_ITINERARY);
   const [inputLocation, setInputLocation] = useState("");
   const [inputNote, setInputNote] = useState("");
   const [suggestions, setSuggestions] = useState([]);
   
-  // AI 相關 State
+  // --- State: AI 功能 ---
   const [aiSuggestions, setAiSuggestions] = useState([]);
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [modalContent, setModalContent] = useState(null);
@@ -101,7 +103,7 @@ export default function OsakaZakkaPlanner() {
   const currentDayIndex = itinerary.findIndex(d => d.day === activeDay);
   const currentDayData = itinerary[currentDayIndex] || { items: [], startTime: "09:00" };
 
-  // 計算時間軸 (Memoized)
+  // --- 計算時間軸 (Computed) ---
   const calculatedTimeline = useMemo(() => {
     let currentTime = currentDayData.startTime;
     const timelineItems = [];
@@ -132,7 +134,7 @@ export default function OsakaZakkaPlanner() {
     return timelineItems;
   }, [currentDayData]);
 
-  // 搜尋建議邏輯
+  // --- Effect: 搜尋建議 ---
   useEffect(() => {
     if (!inputLocation || inputLocation.trim() === "") {
       setSuggestions([]);
@@ -144,9 +146,9 @@ export default function OsakaZakkaPlanner() {
     setSuggestions(matches);
   }, [inputLocation]);
 
-  // ★★★ 修復後的新增項目邏輯 (核心修改) ★★★
+  // --- Action: 新增項目 (核心邏輯修復) ---
   const handleAddItem = (nameOverride, noteOverride) => {
-    // 1. 決定使用傳入的參數還是輸入框的值
+    // 1. 決定要新增的名稱與備註 (優先使用傳入的參數，否則使用輸入框)
     const nameToAdd = typeof nameOverride === 'string' ? nameOverride : inputLocation;
     const noteToAdd = typeof noteOverride === 'string' ? noteOverride : inputNote;
 
@@ -156,10 +158,10 @@ export default function OsakaZakkaPlanner() {
       return;
     }
 
-    // 3. 準備資料
+    // 3. 準備資料物件
     const locData = PREDEFINED_LOCATIONS[nameToAdd];
     const newItem = {
-      id: Date.now().toString() + Math.random().toString(36).substr(2, 5), // 確保 ID 唯一
+      id: Date.now().toString() + Math.random().toString(36).substr(2, 5), // 產生唯一 ID
       name: nameToAdd,
       note: noteToAdd || "自由活動",
       coords: locData || null,
@@ -168,8 +170,8 @@ export default function OsakaZakkaPlanner() {
 
     // 4. 更新 State
     setItinerary(prevItinerary => {
-      // 如果 currentDayIndex 為 -1 (找不到當天)，直接回傳原狀態
       const dayIndex = prevItinerary.findIndex(d => d.day === activeDay);
+      // 如果當天不存在，不執行
       if (dayIndex === -1) return prevItinerary;
 
       const newItinerary = [...prevItinerary];
@@ -186,7 +188,7 @@ export default function OsakaZakkaPlanner() {
     }
   };
 
-  // 刪除項目
+  // --- Action: 刪除項目 ---
   const handleDeleteItem = (itemId) => {
     setItinerary(prev => prev.map(day => {
       if (day.day === activeDay) {
@@ -196,7 +198,7 @@ export default function OsakaZakkaPlanner() {
     }));
   };
 
-  // 移動項目
+  // --- Action: 移動項目 ---
   const moveItem = (index, direction) => {
     const items = [...currentDayData.items];
     if (direction === 'up' && index > 0) {
@@ -213,7 +215,7 @@ export default function OsakaZakkaPlanner() {
     }));
   };
 
-  // 更改時間
+  // --- Action: 更改時間 ---
   const handleStartTimeChange = (e) => {
     const newTime = e.target.value;
     setItinerary(prev => prev.map(day => {
@@ -222,7 +224,7 @@ export default function OsakaZakkaPlanner() {
     }));
   };
 
-  // 自動排序
+  // --- Action: 自動排序 ---
   const autoOptimizeRoute = () => {
     let items = [...currentDayData.items];
     if (items.length <= 2) {
@@ -234,6 +236,7 @@ export default function OsakaZakkaPlanner() {
     let remaining = items.slice(1);
     let current = startPoint;
 
+    // 最近鄰演算法
     while (remaining.length > 0) {
       const hasCoords = remaining.filter(i => i.coords);
       const noCoords = remaining.filter(i => !i.coords);
@@ -268,7 +271,7 @@ export default function OsakaZakkaPlanner() {
     }));
   };
 
-  // API Call Wrapper
+  // --- API: Gemini 呼叫 ---
   const callGeminiAPI = async (prompt) => {
     if (!apiKey) {
       setShowSettings(true);
@@ -303,7 +306,7 @@ export default function OsakaZakkaPlanner() {
     }
   };
 
-  // AI 推薦下一站
+  // --- API: AI 推薦下一站 ---
   const handleGetAISuggestions = async () => {
     setIsAiLoading(true);
     const currentSpots = currentDayData.items.map(i => i.name).join(", ");
@@ -324,7 +327,7 @@ export default function OsakaZakkaPlanner() {
     }
   };
 
-  // 取得景點資訊
+  // --- API: 景點資訊 ---
   const handleGetSpotInfo = async (spotName) => {
     setModalContent({ type: 'info', title: spotName, loading: true });
     const prompt = `請用繁體中文，以「旅遊手帳」的口吻，可愛地介紹大阪景點「${spotName}」的必看亮點 (100字內)。`;
@@ -336,7 +339,7 @@ export default function OsakaZakkaPlanner() {
     }
   };
 
-  // 取得美食
+  // --- API: 美食資訊 ---
   const handleGetFood = async (spotName) => {
     setModalContent({ type: 'food', title: `${spotName} 附近美食`, loading: true });
     const prompt = `請推薦 3 家大阪「${spotName}」附近的可愛咖啡廳或高分美食。回傳純 JSON，不要有 markdown 標記：[{"name":"店名","type":"類型","rating":"4.5","comment":"可愛短評"}]`;
@@ -364,7 +367,7 @@ export default function OsakaZakkaPlanner() {
            backgroundSize: '20px 20px'
          }}>
       
-      {/* 設定 API Key 的 Modal */}
+      {/* --- Modal: 設定 API Key --- */}
       {showSettings && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
           <div className="bg-white p-6 rounded-2xl shadow-xl max-w-sm w-full border-4 border-[#e6ccb2]">
@@ -398,7 +401,7 @@ export default function OsakaZakkaPlanner() {
         </div>
       )}
 
-      {/* 左側：主要操作區 */}
+      {/* --- 左側區塊：主要操作介面 --- */}
       <div className="w-full md:w-1/2 p-4 md:p-6 flex flex-col h-screen overflow-hidden relative">
         
         {/* Header */}
@@ -418,7 +421,7 @@ export default function OsakaZakkaPlanner() {
           </button>
         </div>
 
-        {/* 天數選擇 */}
+        {/* 天數選擇 Tabs */}
         <div className="flex gap-2 overflow-x-auto pb-2 mb-2 scrollbar-hide items-end">
           {itinerary.map(d => (
             <button
@@ -441,10 +444,10 @@ export default function OsakaZakkaPlanner() {
           </button>
         </div>
 
-        {/* 主要內容區塊 */}
+        {/* 主要內容容器 (筆記本風格) */}
         <div className="flex-1 bg-[#fffcf5] rounded-b-2xl rounded-tr-2xl border border-[#dcd6ce] shadow-sm p-4 flex flex-col overflow-hidden relative">
           
-          {/* 每日設定 */}
+          {/* 每日開始時間設定 */}
           <div className="flex items-center justify-between mb-4 border-b-2 border-dashed border-[#e8d5c4] pb-3">
             <div className="flex items-center gap-2 text-sm text-[#8b7e75] bg-[#f2ede6] px-3 py-1.5 rounded-full">
               <Clock className="w-4 h-4 text-[#d4a373]" />
@@ -465,7 +468,7 @@ export default function OsakaZakkaPlanner() {
             </button>
           </div>
 
-          {/* 輸入區 */}
+          {/* 輸入/新增區塊 */}
           <div className="flex gap-2 mb-4 relative z-20 bg-[#fff8e1] p-2 rounded-lg border border-[#f0e6cc] shadow-sm transform -rotate-1">
             <div className="flex-1 relative">
               <input
@@ -475,6 +478,7 @@ export default function OsakaZakkaPlanner() {
                 placeholder="想要去哪裡呢？"
                 className="w-full bg-transparent px-2 py-1 focus:outline-none placeholder-[#c7c0b0]"
               />
+              {/* 搜尋建議下拉選單 */}
               {suggestions.length > 0 && (
                 <div className="absolute top-full left-0 right-0 bg-white border border-[#e8d5c4] mt-2 rounded-lg shadow-lg z-50 overflow-hidden">
                   {suggestions.map(s => (
@@ -497,7 +501,7 @@ export default function OsakaZakkaPlanner() {
             </button>
           </div>
 
-          {/* 行程列表 */}
+          {/* 行程列表 (Scrollable) */}
           <div className="flex-1 overflow-y-auto pr-2 space-y-0 pb-20 custom-scrollbar">
             {calculatedTimeline.length === 0 ? (
               <div className="text-center py-12 text-[#c7c0b0] flex flex-col items-center gap-3">
@@ -509,6 +513,7 @@ export default function OsakaZakkaPlanner() {
             ) : (
               calculatedTimeline.map((item, index) => (
                 <div key={item.id} className="relative pl-2 pb-6 last:pb-0">
+                  {/* 交通時間連接線 */}
                   {index > 0 && (
                     <div className="absolute left-[34px] -top-8 bottom-8 w-0 border-l-2 border-dashed border-[#dcd6ce] -z-10 flex items-center justify-center">
                       <div className="bg-[#fcf9f2] px-1 py-0.5 text-[10px] text-[#b0a89e] transform mt-4 rotate-90">
@@ -518,6 +523,7 @@ export default function OsakaZakkaPlanner() {
                   )}
 
                   <div className="flex gap-3 items-start group">
+                    {/* 時間標示 */}
                     <div className="flex flex-col items-center min-w-[65px] pt-1">
                       <div className="bg-[#e6ccb2] text-white text-[10px] px-2 py-0.5 rounded-full mb-1 shadow-sm font-mono">
                         {item.arrivalTime}
@@ -526,6 +532,7 @@ export default function OsakaZakkaPlanner() {
                       <span className="text-[10px] text-[#b0a89e] font-mono">{item.departureTime}</span>
                     </div>
 
+                    {/* 行程卡片 */}
                     <div className="flex-1 bg-white p-3 rounded-xl border border-[#ebe5dd] shadow-[2px_2px_0px_#f0eadd] hover:shadow-[3px_3px_0px_#e0d8c8] hover:-translate-y-0.5 transition-all">
                       <div className="flex justify-between items-start">
                         <div>
@@ -539,13 +546,13 @@ export default function OsakaZakkaPlanner() {
                         </div>
                         
                         <div className="flex gap-1.5">
-                          <button onClick={() => handleGetFood(item.name)} className="w-7 h-7 flex items-center justify-center text-[#e76f51] bg-[#fff0ed] hover:bg-[#ffe0db] rounded-full transition-colors">
+                          <button onClick={() => handleGetFood(item.name)} className="w-7 h-7 flex items-center justify-center text-[#e76f51] bg-[#fff0ed] hover:bg-[#ffe0db] rounded-full transition-colors" title="找美食">
                             <Utensils className="w-3.5 h-3.5" />
                           </button>
-                          <button onClick={() => handleGetSpotInfo(item.name)} className="w-7 h-7 flex items-center justify-center text-[#2a9d8f] bg-[#e0fbfc] hover:bg-[#cbf7f9] rounded-full transition-colors">
+                          <button onClick={() => handleGetSpotInfo(item.name)} className="w-7 h-7 flex items-center justify-center text-[#2a9d8f] bg-[#e0fbfc] hover:bg-[#cbf7f9] rounded-full transition-colors" title="看介紹">
                             <Sparkles className="w-3.5 h-3.5" />
                           </button>
-                          <button onClick={() => handleDeleteItem(item.id)} className="w-7 h-7 flex items-center justify-center text-[#d6ccc2] hover:text-[#e76f51] hover:bg-[#fff0ed] rounded-full">
+                          <button onClick={() => handleDeleteItem(item.id)} className="w-7 h-7 flex items-center justify-center text-[#d6ccc2] hover:text-[#e76f51] hover:bg-[#fff0ed] rounded-full" title="刪除">
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         </div>
@@ -555,6 +562,7 @@ export default function OsakaZakkaPlanner() {
                         {item.note}
                       </div>
 
+                      {/* 排序按鈕 */}
                       <div className="flex justify-end gap-1 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
                          <button onClick={() => moveItem(index, 'up')} disabled={index === 0} className="text-xs text-[#b0a89e] hover:text-[#8b5e3c] px-2 py-1 bg-[#f2ede6] rounded-md">⬆</button>
                          <button onClick={() => moveItem(index, 'down')} disabled={index === calculatedTimeline.length - 1} className="text-xs text-[#b0a89e] hover:text-[#8b5e3c] px-2 py-1 bg-[#f2ede6] rounded-md">⬇</button>
@@ -565,6 +573,7 @@ export default function OsakaZakkaPlanner() {
               ))
             )}
 
+            {/* AI 按鈕 */}
             <button
               onClick={handleGetAISuggestions}
               disabled={isAiLoading}
@@ -574,6 +583,7 @@ export default function OsakaZakkaPlanner() {
               請問 Gemini 醬下一站去哪？ ✨
             </button>
 
+            {/* AI 建議結果卡片 */}
             {aiSuggestions.length > 0 && (
               <div className="mt-4 grid grid-cols-1 gap-2 animate-in slide-in-from-bottom-2">
                 {aiSuggestions.map((s, idx) => (
@@ -599,7 +609,7 @@ export default function OsakaZakkaPlanner() {
           </div>
         </div>
 
-        {/* Modal 視窗 */}
+        {/* --- Modal 視窗 (資訊/美食) --- */}
         {modalContent && (
           <div className="absolute inset-0 z-50 flex items-center justify-center bg-[#5a554e]/40 backdrop-blur-[2px] p-6">
              <div className="bg-[#fffcf5] w-full max-w-sm max-h-[80vh] overflow-y-auto rounded-xl shadow-[5px_5px_0px_rgba(0,0,0,0.1)] p-0 animate-in zoom-in-95 duration-200 border-2 border-[#e6ccb2] flex flex-col relative">
@@ -654,13 +664,16 @@ export default function OsakaZakkaPlanner() {
         )}
       </div>
 
-      {/* 右側：地圖視覺化 */}
-      <div className="hidden md:flex w-1/2 relative items-center justify-center p-8 bg-[#f2ede6] border-l-4 border-dashed border-[#e6ccb2]">
+      {/* --- 右側區塊：地圖視覺化 (全寬/響應式顯示) --- */}
+      <div className="flex w-full md:w-1/2 min-h-[50vh] relative items-center justify-center p-8 bg-[#f2ede6] border-t-4 md:border-t-0 md:border-l-4 border-dashed border-[#e6ccb2]">
         <div className="w-full max-w-md aspect-[3/4] bg-white p-4 pb-16 shadow-[5px_5px_15px_rgba(0,0,0,0.05)] rotate-1 relative transition-transform hover:rotate-0 duration-500">
            <div className="w-full h-full bg-[#e0fbfc]/30 border border-[#e0fbfc] relative overflow-hidden">
+             {/* 手繪裝飾背景 */}
              <div className="absolute top-10 left-10 w-32 h-32 bg-[#fff0ed] rounded-full mix-blend-multiply filter blur-2xl opacity-60"></div>
              <div className="absolute bottom-10 right-10 w-40 h-40 bg-[#fbf8cc] rounded-full mix-blend-multiply filter blur-2xl opacity-60"></div>
+             
              <svg className="w-full h-full overflow-visible">
+               {/* 連結線 */}
                <polyline 
                  points={calculatedTimeline.filter(i => i.coords).map(i => `${i.coords.x}%,${i.coords.y}%`).join(' ')}
                  fill="none"
@@ -669,6 +682,7 @@ export default function OsakaZakkaPlanner() {
                  strokeDasharray="6 4"
                  strokeLinecap="round"
                />
+               {/* 景點與座標 */}
                {calculatedTimeline.map((item, index) => {
                  if (!item.coords) return null;
                  return (
@@ -683,6 +697,7 @@ export default function OsakaZakkaPlanner() {
              <div className="absolute top-[20%] left-[50%] -translate-x-1/2 text-[#2a9d8f]/20 text-4xl font-black rotate-12 select-none">KITA</div>
              <div className="absolute top-[65%] left-[50%] -translate-x-1/2 text-[#e76f51]/20 text-4xl font-black -rotate-6 select-none">MINAMI</div>
            </div>
+           {/* 底部文字 */}
            <div className="absolute bottom-4 left-0 w-full text-center font-['Zen_Maru_Gothic'] text-[#8b5e3c] opacity-80 flex items-center justify-center gap-2">
               <Heart className="w-4 h-4 text-[#e76f51] fill-[#e76f51]" /> Day {activeDay} 的小旅行
            </div>
