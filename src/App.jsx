@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Navigation, Plus, Trash2, Clock, Map as MapIcon, Sparkles, Info, X, 
-  Loader2, Utensils, Plane, Coffee, Camera, Heart, Settings, AlertCircle
+  Loader2, Utensils, Plane, Coffee, Camera, Heart, Settings, AlertCircle,
+  CheckCircle2
 } from 'lucide-react';
 
 // --- 風格設定 (Zakka Style) ---
@@ -63,15 +64,24 @@ const addTime = (timeStr, minutes) => {
 };
 
 export default function OsakaZakkaPlanner() {
-  const [apiKey, setApiKey] = useState(() => localStorage.getItem("gemini_api_key") || "");
+  // API Key 相關
+  const [apiKey, setApiKey] = useState(() => {
+    try {
+      return localStorage.getItem("gemini_api_key") || "";
+    } catch (e) {
+      return "";
+    }
+  });
   const [showSettings, setShowSettings] = useState(!apiKey);
   
+  // 核心資料 State
   const [activeDay, setActiveDay] = useState(1);
   const [itinerary, setItinerary] = useState(DEFAULT_ITINERARY);
   const [inputLocation, setInputLocation] = useState("");
   const [inputNote, setInputNote] = useState("");
   const [suggestions, setSuggestions] = useState([]);
   
+  // AI 相關 State
   const [aiSuggestions, setAiSuggestions] = useState([]);
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [modalContent, setModalContent] = useState(null);
@@ -79,15 +89,19 @@ export default function OsakaZakkaPlanner() {
   // 儲存 API Key
   const handleSaveKey = (key) => {
     setApiKey(key);
-    localStorage.setItem("gemini_api_key", key);
+    try {
+      localStorage.setItem("gemini_api_key", key);
+    } catch (e) {
+      console.warn("無法寫入 localStorage");
+    }
     setShowSettings(false);
   };
 
-  // 當天資料
+  // 取得當前天數資料
   const currentDayIndex = itinerary.findIndex(d => d.day === activeDay);
   const currentDayData = itinerary[currentDayIndex] || { items: [], startTime: "09:00" };
 
-  // 時間軸計算
+  // 計算時間軸 (Memoized)
   const calculatedTimeline = useMemo(() => {
     let currentTime = currentDayData.startTime;
     const timelineItems = [];
@@ -99,7 +113,7 @@ export default function OsakaZakkaPlanner() {
         if (prevItem.coords && item.coords) {
           travelMinutes = estimateTravelTime(prevItem.coords, item.coords);
         } else {
-          travelMinutes = 30;
+          travelMinutes = 30; // 預設移動時間
         }
         currentTime = addTime(currentTime, travelMinutes);
       }
@@ -118,9 +132,9 @@ export default function OsakaZakkaPlanner() {
     return timelineItems;
   }, [currentDayData]);
 
-  // 輸入建議
+  // 搜尋建議邏輯
   useEffect(() => {
-    if (inputLocation.trim() === "") {
+    if (!inputLocation || inputLocation.trim() === "") {
       setSuggestions([]);
       return;
     }
@@ -130,50 +144,82 @@ export default function OsakaZakkaPlanner() {
     setSuggestions(matches);
   }, [inputLocation]);
 
-  // 新增項目
-  const handleAddItem = (name = inputLocation, note = inputNote) => {
-    if (!name || !name.trim()) return;
-    const locData = PREDEFINED_LOCATIONS[name];
+  // ★★★ 修復後的新增項目邏輯 (核心修改) ★★★
+  const handleAddItem = (nameOverride, noteOverride) => {
+    // 1. 決定使用傳入的參數還是輸入框的值
+    const nameToAdd = typeof nameOverride === 'string' ? nameOverride : inputLocation;
+    const noteToAdd = typeof noteOverride === 'string' ? noteOverride : inputNote;
+
+    // 2. 驗證
+    if (!nameToAdd || !nameToAdd.trim()) {
+      alert("請輸入景點名稱喔！");
+      return;
+    }
+
+    // 3. 準備資料
+    const locData = PREDEFINED_LOCATIONS[nameToAdd];
     const newItem = {
-      id: Date.now().toString(),
-      name: name,
-      note: note || "自由活動",
+      id: Date.now().toString() + Math.random().toString(36).substr(2, 5), // 確保 ID 唯一
+      name: nameToAdd,
+      note: noteToAdd || "自由活動",
       coords: locData || null,
       duration: locData ? locData.defaultDuration : 90
     };
-    const newItinerary = [...itinerary];
-    if (currentDayIndex === -1) return; // 安全檢查
-    newItinerary[currentDayIndex].items.push(newItem);
-    setItinerary(newItinerary);
-    setInputLocation("");
-    setInputNote("");
-    setSuggestions([]);
+
+    // 4. 更新 State
+    setItinerary(prevItinerary => {
+      // 如果 currentDayIndex 為 -1 (找不到當天)，直接回傳原狀態
+      const dayIndex = prevItinerary.findIndex(d => d.day === activeDay);
+      if (dayIndex === -1) return prevItinerary;
+
+      const newItinerary = [...prevItinerary];
+      const newItems = [...newItinerary[dayIndex].items, newItem];
+      newItinerary[dayIndex] = { ...newItinerary[dayIndex], items: newItems };
+      return newItinerary;
+    });
+
+    // 5. 如果是用輸入框新增的，才清空輸入框
+    if (nameToAdd === inputLocation) {
+      setInputLocation("");
+      setInputNote("");
+      setSuggestions([]);
+    }
   };
 
   // 刪除項目
   const handleDeleteItem = (itemId) => {
-    const newItinerary = [...itinerary];
-    newItinerary[currentDayIndex].items = newItinerary[currentDayIndex].items.filter(i => i.id !== itemId);
-    setItinerary(newItinerary);
+    setItinerary(prev => prev.map(day => {
+      if (day.day === activeDay) {
+        return { ...day, items: day.items.filter(i => i.id !== itemId) };
+      }
+      return day;
+    }));
   };
 
   // 移動項目
   const moveItem = (index, direction) => {
-    const newItems = [...currentDayData.items];
+    const items = [...currentDayData.items];
     if (direction === 'up' && index > 0) {
-      [newItems[index], newItems[index - 1]] = [newItems[index - 1], newItems[index]];
-    } else if (direction === 'down' && index < newItems.length - 1) {
-      [newItems[index], newItems[index + 1]] = [newItems[index + 1], newItems[index]];
+      [items[index], items[index - 1]] = [items[index - 1], items[index]];
+    } else if (direction === 'down' && index < items.length - 1) {
+      [items[index], items[index + 1]] = [items[index + 1], items[index]];
     }
-    const newItinerary = [...itinerary];
-    newItinerary[currentDayIndex].items = newItems;
-    setItinerary(newItinerary);
+    
+    setItinerary(prev => prev.map(day => {
+      if (day.day === activeDay) {
+        return { ...day, items };
+      }
+      return day;
+    }));
   };
 
+  // 更改時間
   const handleStartTimeChange = (e) => {
-    const newItinerary = [...itinerary];
-    newItinerary[currentDayIndex].startTime = e.target.value;
-    setItinerary(newItinerary);
+    const newTime = e.target.value;
+    setItinerary(prev => prev.map(day => {
+      if (day.day === activeDay) return { ...day, startTime: newTime };
+      return day;
+    }));
   };
 
   // 自動排序
@@ -215,12 +261,14 @@ export default function OsakaZakkaPlanner() {
       current = nearest;
       remaining = remaining.filter(r => r.id !== nearest.id);
     }
-    const newItinerary = [...itinerary];
-    newItinerary[currentDayIndex].items = optimized;
-    setItinerary(newItinerary);
+    
+    setItinerary(prev => prev.map(day => {
+      if (day.day === activeDay) return { ...day, items: optimized };
+      return day;
+    }));
   };
 
-  // API Calls
+  // API Call Wrapper
   const callGeminiAPI = async (prompt) => {
     if (!apiKey) {
       setShowSettings(true);
@@ -255,6 +303,7 @@ export default function OsakaZakkaPlanner() {
     }
   };
 
+  // AI 推薦下一站
   const handleGetAISuggestions = async () => {
     setIsAiLoading(true);
     const currentSpots = currentDayData.items.map(i => i.name).join(", ");
@@ -275,6 +324,7 @@ export default function OsakaZakkaPlanner() {
     }
   };
 
+  // 取得景點資訊
   const handleGetSpotInfo = async (spotName) => {
     setModalContent({ type: 'info', title: spotName, loading: true });
     const prompt = `請用繁體中文，以「旅遊手帳」的口吻，可愛地介紹大阪景點「${spotName}」的必看亮點 (100字內)。`;
@@ -286,6 +336,7 @@ export default function OsakaZakkaPlanner() {
     }
   };
 
+  // 取得美食
   const handleGetFood = async (spotName) => {
     setModalContent({ type: 'food', title: `${spotName} 附近美食`, loading: true });
     const prompt = `請推薦 3 家大阪「${spotName}」附近的可愛咖啡廳或高分美食。回傳純 JSON，不要有 markdown 標記：[{"name":"店名","type":"類型","rating":"4.5","comment":"可愛短評"}]`;
@@ -427,14 +478,21 @@ export default function OsakaZakkaPlanner() {
               {suggestions.length > 0 && (
                 <div className="absolute top-full left-0 right-0 bg-white border border-[#e8d5c4] mt-2 rounded-lg shadow-lg z-50 overflow-hidden">
                   {suggestions.map(s => (
-                    <div key={s} onClick={() => { setInputLocation(s); setSuggestions([]); }} className="px-3 py-2 hover:bg-[#fff9e6] cursor-pointer text-sm text-[#8b7e75]">
+                    <div 
+                      key={s} 
+                      onClick={() => { setInputLocation(s); setSuggestions([]); }} 
+                      className="px-3 py-2 hover:bg-[#fff9e6] cursor-pointer text-sm text-[#8b7e75]"
+                    >
                       {s}
                     </div>
                   ))}
                 </div>
               )}
             </div>
-            <button onClick={() => handleAddItem()} className="bg-[#e9c46a] text-white w-8 h-8 rounded-full flex items-center justify-center hover:bg-[#e0b855] shadow-sm">
+            <button 
+              onClick={() => handleAddItem()} 
+              className="bg-[#e9c46a] text-white w-8 h-8 rounded-full flex items-center justify-center hover:bg-[#e0b855] shadow-sm active:scale-95 transition-transform"
+            >
               <Plus className="w-5 h-5" />
             </button>
           </div>
@@ -528,7 +586,10 @@ export default function OsakaZakkaPlanner() {
                       </div>
                       <div className="text-xs text-[#9c948a] mt-0.5">{s.reason}</div>
                     </div>
-                    <button onClick={() => handleAddItem(s.name, `✨ ${s.reason}`)} className="bg-[#9d8189] text-white w-7 h-7 rounded-full flex items-center justify-center hover:bg-[#866e75]">
+                    <button 
+                      onClick={() => handleAddItem(s.name, `✨ ${s.reason}`)} 
+                      className="bg-[#9d8189] text-white w-7 h-7 rounded-full flex items-center justify-center hover:bg-[#866e75] active:scale-95 transition-transform"
+                    >
                       <Plus className="w-4 h-4" />
                     </button>
                   </div>
@@ -569,7 +630,18 @@ export default function OsakaZakkaPlanner() {
                          <div className="flex gap-2 text-xs text-[#a69b91] mb-2">
                            <span className="bg-[#f2ede6] px-1.5 rounded">{food.type}</span>
                          </div>
-                         <div className="text-sm text-[#8b7e75] border-t border-dashed border-[#f2ede6] pt-2">{food.comment}</div>
+                         <div className="text-sm text-[#8b7e75] border-t border-dashed border-[#f2ede6] pt-2 mb-2">{food.comment}</div>
+                         
+                         {/* ★★★ 新增：美食加入按鈕 ★★★ */}
+                         <button 
+                           onClick={() => {
+                             handleAddItem(food.name, `🍽️ 美食: ${food.type}`);
+                             setModalContent(null);
+                           }}
+                           className="w-full py-2 bg-[#f2ede6] text-[#8b5e3c] text-xs font-bold rounded flex items-center justify-center gap-1 hover:bg-[#e6ccb2] transition-colors"
+                         >
+                           <Plus className="w-3 h-3" /> 加入行程
+                         </button>
                        </div>
                      ))}
                    </div>
